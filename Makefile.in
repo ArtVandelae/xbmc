@@ -135,6 +135,7 @@ LIB_DIRS=\
 	lib/libhdhomerun \
 	lib/libid3tag \
 	lib/libapetag \
+	lib/taglib \
 	xbmc/interfaces/python/linux \
 	lib/cpluff \
 	lib/libmodplug \
@@ -384,6 +385,8 @@ xbmc/osx/osx.a: force
 	$(MAKE) -C xbmc/osx
 lib/libapetag/.libs/libapetag.a: force
 	$(MAKE) -C lib/libapetag
+lib/taglib/taglib/libtag.a: force
+	$(MAKE) -C lib/taglib
 lib/cpluff/libcpluff/.libs/libcpluff.a: force
 	$(MAKE) -C lib/cpluff/libcpluff
 system/libcpluff-$(ARCH).so: lib/cpluff/libcpluff/.libs/libcpluff.a
@@ -492,6 +495,7 @@ xcode_depends: \
 	codecs libs python visualizations screensavers eventclients skins \
 	lib/libsquish/libsquish-@ARCH@.a \
 	lib/libapetag/.libs/libapetag.a \
+	lib/taglib/taglib/libtag.a \
 	lib/cmyth/libcmyth/libcmyth.a \
 	lib/cmyth/librefmem/librefmem.a \
 	lib/libXBMS/libxbms-@ARCH@.a \
@@ -558,6 +562,7 @@ OBJSXBMC=	\
 	xbmc/dbwrappers/dbwrappers.a \
 	lib/libsquish/libsquish-@ARCH@.a \
 	lib/libapetag/.libs/libapetag.a \
+	lib/taglib/taglib/libtag.a \
 	lib/xbmc-dll-symbols/dll-symbols.a \
         xbmc/rendering/rendering.a \
         xbmc/windowing/windowing.a \
