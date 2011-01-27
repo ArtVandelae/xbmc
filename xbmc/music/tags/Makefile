@@ -2,6 +2,7 @@ SRCS=APEv2Tag.cpp \
      FlacTag.cpp \
      Id3Tag.cpp \
      MusicInfoTag.cpp \
+     MusicInfoTagLoaderTagLib.cpp \
      MusicInfoTagLoaderAAC.cpp \
      MusicInfoTagLoaderApe.cpp \
      MusicInfoTagLoaderASAP.cpp \

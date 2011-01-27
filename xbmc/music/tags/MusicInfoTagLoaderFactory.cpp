@@ -21,6 +21,7 @@
 
 #include "system.h"
 #include "MusicInfoTagLoaderFactory.h"
+#include "MusicInfoTagLoaderTagLib.h"
 #include "MusicInfoTagLoaderMP3.h"
 #include "MusicInfoTagLoaderOgg.h"
 #include "MusicInfoTagLoaderWMA.h"
@@ -73,7 +74,12 @@ IMusicInfoTagLoader* CMusicInfoTagLoaderFactory::CreateLoader(const CStdString& 
   if (strExtension.IsEmpty())
     return NULL;
 
-  if (strExtension == "mp3")
+  if (CMusicInfoTagLoaderTagLib::SupportsFormat(strExtension))
+  {
+    CMusicInfoTagLoaderTagLib *pTagLoader = new CMusicInfoTagLoaderTagLib();
+    return (IMusicInfoTagLoader*)pTagLoader;
+  }
+  else if (strExtension == "mp3")
   {
     CMusicInfoTagLoaderMP3 *pTagLoader = new CMusicInfoTagLoaderMP3();
     return (IMusicInfoTagLoader*)pTagLoader;

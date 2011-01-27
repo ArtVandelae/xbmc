@@ -1959,11 +1959,11 @@ XB_CONFIG_MODULE([lib/libapetag], [
 
 XB_CONFIG_MODULE([lib/taglib],[
   if test "$host_vendor" = "apple" ; then
-    rm -f CMakeCache.txt && CC="" CXX=""  cmake -D CMAKE_C_FLAGS:STRING="${CFLAGS} -fno-common" -D CMAKE_CXX_FLAGS:STRING="${CXXFLAGS} -fno-common" -D CMAKE_BUILD_TYPE:STRING=RelWithDebInfo -D ENABLE_STATIC:BOOL=ON .
+    rm -f CMakeCache.txt && CC="" CXX=""  cmake -D CMAKE_C_FLAGS:STRING="${CFLAGS} -fno-common" -D CMAKE_CXX_FLAGS:STRING="${CXXFLAGS} -fno-common" -D CMAKE_BUILD_TYPE:STRING=RelWithDebInfo -D ENABLE_STATIC:BOOL=ON -DWITH_ASF:BOOL=ON -DWITH_MP4:BOOL=ON .
   else
 set -x
     rm -f CMakeCache.txt && CC="$CC" CXX="$CXX" cmake -DCMAKE_BUILD_TYPE=None \
-      -DENABLE_STATIC:BOOL=ON \
+      -DENABLE_STATIC:BOOL=ON -DWITH_ASF:BOOL=ON -DWITH_MP4:BOOL=ON \
       -DCMAKE_C_FLAGS:STRING="${CFLAGS}" -DCMAKE_CXX_FLAGS:STRING="${CXXFLAGS}" \
       -DCMAKE_INSTALL_PREFIX="${prefix}" -DCMAKE_INSTALL_LIBDIR:PATH="${libdir}" \
       -DINCLUDE_INSTALL_DIR:PATH="${includedir}" -DLIB_INSTALL_DIR:PATH="${libdir}" \
