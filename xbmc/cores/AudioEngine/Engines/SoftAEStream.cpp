@@ -20,7 +20,7 @@
  */
 
 #include "system.h"
-#include "threads/SingleLock.h"
+#include "threads/Atomics.h"
 #include "utils/log.h"
 #include "utils/MathUtils.h"
 #include "DllAvCore.h"
@@ -39,6 +39,7 @@
 using namespace std;
 
 CSoftAEStream::CSoftAEStream(enum AEDataFormat dataFormat, unsigned int sampleRate, CAEChannelInfo channelLayout, unsigned int options) :
+  m_lock            (0    ),
   m_convertBuffer   (NULL ),
   m_valid           (false),
   m_delete          (false),
@@ -68,8 +69,8 @@ CSoftAEStream::CSoftAEStream(enum AEDataFormat dataFormat, unsigned int sampleRa
 }
 
 void CSoftAEStream::InitializeRemap()
-{
-  CSingleLock lock(m_critSection);
+{  
+  CAtomicSpinLock lock(m_lock);
   if (!AE_IS_RAW(m_initDataFormat))
   {
     /* re-init the remappers */
@@ -91,7 +92,7 @@ void CSoftAEStream::InitializeRemap()
 
 void CSoftAEStream::Initialize()
 {
-  CSingleLock lock(m_critSection);
+  CAtomicSpinLock lock(m_lock);
   if (m_valid)
   {
     InternalFlush();
@@ -195,14 +196,14 @@ void CSoftAEStream::Initialize()
 
 void CSoftAEStream::Destroy()
 {
-  CSingleLock lock(m_critSection);
+  CAtomicSpinLock lock(m_lock);
   m_valid       = false;
   m_delete      = true;
 }
 
 CSoftAEStream::~CSoftAEStream()
 {
-  CSingleLock lock(m_critSection);
+  CAtomicSpinLock lock(m_lock);
 
   InternalFlush();
   _aligned_free(m_frameBuffer);
@@ -223,7 +224,7 @@ CSoftAEStream::~CSoftAEStream()
 
 unsigned int CSoftAEStream::GetSpace()
 {
-  CSingleLock lock(m_critSection);
+  CAtomicSpinLock lock(m_lock);
   if (!m_valid || m_draining) return 0;  
 
   if (m_framesBuffered >= m_waterLevel)
@@ -234,7 +235,7 @@ unsigned int CSoftAEStream::GetSpace()
 
 unsigned int CSoftAEStream::AddData(void *data, unsigned int size)
 {
-  CSingleLock lock(m_critSection);
+  CAtomicSpinLock lock(m_lock);
   if (!m_valid || size == 0 || data == NULL || m_draining) return 0;  
 
   if (m_framesBuffered >= m_waterLevel)
@@ -374,7 +375,7 @@ unsigned int CSoftAEStream::ProcessFrameBuffer()
 
 uint8_t* CSoftAEStream::GetFrame()
 {
-  CSingleLock lock(m_critSection);
+  CAtomicSpinLock lock(m_lock);
 
   /* if we have been deleted or are refilling but not draining */
   if (!m_valid || m_delete || (m_refillBuffer && !m_draining)) return NULL;
@@ -477,19 +478,19 @@ float CSoftAEStream::GetCacheTotal()
 
 void CSoftAEStream::Drain()
 {
-  CSingleLock lock(m_critSection);
+  CAtomicSpinLock lock(m_lock);
   m_draining = true;
 }
 
 bool CSoftAEStream::IsDrained()
 {
-  CSingleLock lock(m_critSection);  
+  CAtomicSpinLock lock(m_lock);  
   return (!m_packet.samples && m_outBuffer.empty());
 }
 
 void CSoftAEStream::Flush()
 {
-  CSingleLock lock(m_critSection);
+  CAtomicSpinLock lock(m_lock);
   InternalFlush();
 
   /* internal flush does not do this as these samples are still valid if we are re-initializing */
@@ -533,7 +534,7 @@ double CSoftAEStream::GetResampleRatio()
   if (!m_resample)
     return 1.0f;
 
-  CSingleLock lock(m_critSection);
+  CAtomicSpinLock lock(m_lock);
   return m_ssrcData.src_ratio;
 }
 
@@ -542,7 +543,7 @@ void CSoftAEStream::SetResampleRatio(double ratio)
   if (!m_resample)
     return;
 
-  CSingleLock lock(m_critSection);
+  CAtomicSpinLock lock(m_lock);
 
   int oldRatioInt = std::ceil(m_ssrcData.src_ratio);
 
@@ -560,7 +561,7 @@ void CSoftAEStream::SetResampleRatio(double ratio)
 
 void CSoftAEStream::RegisterAudioCallback(IAudioCallback* pCallback)
 {
-  CSingleLock lock(m_critSection);
+  CAtomicSpinLock lock(m_lock);
   m_vizBufferSamples = 0;
   m_audioCallback = pCallback;
   if (m_audioCallback)
@@ -569,7 +570,7 @@ void CSoftAEStream::RegisterAudioCallback(IAudioCallback* pCallback)
 
 void CSoftAEStream::UnRegisterAudioCallback()
 {
-  CSingleLock lock(m_critSection);
+  CAtomicSpinLock lock(m_lock);
   m_audioCallback = NULL;
   m_vizBufferSamples = 0;
 }

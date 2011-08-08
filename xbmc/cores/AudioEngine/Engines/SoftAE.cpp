@@ -25,7 +25,7 @@
 #include "utils/log.h"
 #include "utils/TimeUtils.h"
 #include "utils/MathUtils.h"
-#include "threads/SingleLock.h"
+#include "threads/Atomics.h"
 #include "settings/GUISettings.h"
 #include "settings/Settings.h"
 #include "settings/AdvancedSettings.h"
@@ -52,6 +52,10 @@ CSoftAE::CSoftAE():
   m_preferSeemless     (true ),
   m_running            (false),
   m_reOpened           (false),
+  m_runningLock        (0    ),
+  m_streamLock         (0    ),
+  m_soundLock          (0    ),
+  m_soundSampleLock    (0    ),
   m_sink               (NULL ),
   m_transcode          (false),
   m_rawPassthrough     (false),
@@ -75,7 +79,7 @@ CSoftAE::~CSoftAE()
   Deinitialize();
 
   /* free the streams */
-  CSingleLock streamLock(m_streamLock);
+  CAtomicSpinLock streamLock(m_streamLock);
   while(!m_streams.empty())
   {
     CSoftAEStream *s = m_streams.front();
@@ -84,7 +88,7 @@ CSoftAE::~CSoftAE()
   }
 
   /* free the sounds */
-  CSingleLock soundLock(m_soundLock);
+  CAtomicSpinLock soundLock(m_soundLock);
   while(!m_sounds.empty())
   {
     CSoftAESound *s = m_sounds.front();
@@ -107,6 +111,7 @@ bool CSoftAE::OpenSink()
   bool wasRawPassthrough      = m_rawPassthrough;
   bool reInit                 = false;
   CSoftAEStream *masterStream = NULL;
+  AEAudioFormat newFormat;
 
   /* lock the sink so the thread gets held up */
   CExclusiveLock sinkLock(m_sinkLock);
@@ -114,50 +119,47 @@ bool CSoftAE::OpenSink()
   LoadSettings();
  
   /* remove any deleted streams */
-  CSingleLock streamLock(m_streamLock);
-  for(StreamList::iterator itt = m_streams.begin(); itt != m_streams.end();)
   {
-    CSoftAEStream *stream = *itt;
-    if (stream->IsDestroyed())
+    CAtomicSpinLock streamLock(m_streamLock);
+    for(StreamList::iterator itt = m_streams.begin(); itt != m_streams.end();)
     {
-      itt = m_streams.erase(itt);
-      delete stream;
-      continue;
+      CSoftAEStream *stream = *itt;
+      if (stream->IsDestroyed())
+      {
+        itt = m_streams.erase(itt);
+        delete stream;
+        continue;
+      }
+
+      /* prefer the first found raw stream over any others as the master */
+      if (stream->IsRaw() &! masterStream)
+      {
+        masterStream      = stream;
+        m_rawPassthrough  = true;
+      }
+
+      ++itt;
     }
 
-    /* prefer the first found raw stream over any others as the master */
-    if (stream->IsRaw() &! masterStream)
+    /* if we dont have a master stream, choose one based on the seemless setting */
+    if (!masterStream && !m_streams.empty())
+      masterStream = m_preferSeemless ? m_streams.front() : m_streams.back();
+
+    /* override the sample rate & channel layout based on the master stream if there is one */
+    if (masterStream)
     {
-      masterStream      = stream;
-      m_rawPassthrough  = true;
+      newFormat.m_sampleRate    = masterStream->GetSampleRate();
+      newFormat.m_channelLayout = masterStream->m_initChannelLayout;
+      /* dont resolve the channels if we are transoding or in raw mode */
+      if (!m_transcode && !m_rawPassthrough)
+        newFormat.m_channelLayout.ResolveChannels(m_stdChLayout);
     }
-
-    ++itt;
+    else
+    {
+      newFormat.m_sampleRate    = 44100;
+      newFormat.m_channelLayout = AE_CH_LAYOUT_2_0;
+    }
   }
-
-  /* if we dont have a master stream, choose one based on the seemless setting */
-  if (!masterStream && !m_streams.empty())
-    masterStream = m_preferSeemless ? m_streams.front() : m_streams.back();
-
-  /* the desired format */
-  AEAudioFormat newFormat;
-
-  /* override the sample rate & channel layout based on the master stream if there is one */
-  if (masterStream)
-  {
-    newFormat.m_sampleRate    = masterStream->GetSampleRate();
-    newFormat.m_channelLayout = masterStream->m_initChannelLayout;    
-    /* dont resolve the channels if we are transoding or in raw mode */
-    if (!m_transcode && !m_rawPassthrough)
-      newFormat.m_channelLayout.ResolveChannels(m_stdChLayout);
-  }
-  else
-  {
-    newFormat.m_sampleRate    = 44100;
-    newFormat.m_channelLayout = AE_CH_LAYOUT_2_0;
-  }
-
-  streamLock.Leave();
 
   CStdString device, driver;
   if (m_transcode || m_rawPassthrough)
@@ -326,16 +328,15 @@ bool CSoftAE::OpenSink()
   if (reInit)
   {
     /* re-init sounds, it is safe to do this here as the sinkLock prevents the thread from accessing the running sounds list */
-    CSingleLock soundLock(m_soundLock);
+    CAtomicSpinLock soundLock(m_soundLock);
     StopAllSounds();
     for(SoundList::iterator itt = m_sounds.begin(); itt != m_sounds.end(); ++itt)
       (*itt)->Initialize();
 
     /* re-init streams */
-    streamLock.Enter();
+    CAtomicSpinLock streamLock(m_streamLock);
     for(StreamList::iterator itt = m_streams.begin(); itt != m_streams.end(); ++itt)
-      (*itt)->Initialize();  
-    streamLock.Leave();
+      (*itt)->Initialize();
   }
   
   return (m_sink != NULL);
@@ -396,7 +397,7 @@ void CSoftAE::OnSettingsChange(CStdString setting)
   if (setting == "audiooutput.dontnormalizelevels")
   {
     /* re-init streams reampper */
-    CSingleLock streamLock(m_streamLock);
+    CAtomicSpinLock streamLock(m_streamLock);
     for(StreamList::iterator itt = m_streams.begin(); itt != m_streams.end(); ++itt)
       (*itt)->InitializeRemap();
   }
@@ -531,7 +532,7 @@ void CSoftAE::Stop()
   m_running = false;
 
   /* wait for the thread to stop */
-  CSingleLock lock(m_runningLock);
+  CAtomicSpinLock lock(m_runningLock);
 }
 
 IAEStream *CSoftAE::MakeStream(enum AEDataFormat dataFormat, unsigned int sampleRate, CAEChannelInfo channelLayout, unsigned int options/* = 0 */)
@@ -543,15 +544,16 @@ IAEStream *CSoftAE::MakeStream(enum AEDataFormat dataFormat, unsigned int sample
     ((CStdString)channelInfo).c_str()
   );
 
-  CSingleLock streamLock(m_streamLock);
-  bool wasEmpty = m_streams.empty();
-  CSoftAEStream *stream = new CSoftAEStream(dataFormat, sampleRate, channelLayout, options);
-  m_streams.push_back(stream);
-  streamLock.Leave();
+  bool wasEmpty;
+  CSoftAEStream *stream;
+  {
+    CAtomicSpinLock streamLock(m_streamLock);
+    wasEmpty = m_streams.empty();
+    stream   = new CSoftAEStream(dataFormat, sampleRate, channelLayout, options);
+    m_streams.push_back(stream);
+  }
 
-  if (AE_IS_RAW(dataFormat))
-    OpenSink();
-  else if (wasEmpty || !m_preferSeemless)
+  if (AE_IS_RAW(dataFormat) || wasEmpty || !m_preferSeemless)
     OpenSink();
 
   /* if the stream was not initialized, do it now */
@@ -563,7 +565,7 @@ IAEStream *CSoftAE::MakeStream(enum AEDataFormat dataFormat, unsigned int sample
 
 IAESound *CSoftAE::MakeSound(CStdString file)
 {
-  CSingleLock soundLock(m_soundLock);
+  CAtomicSpinLock soundLock(m_soundLock);
 
   CSoftAESound *sound = new CSoftAESound(file);
   if (!sound->Initialize())
@@ -583,7 +585,7 @@ void CSoftAE::PlaySound(IAESound *sound)
      return;
 
    /* add the sound to the play list */
-   CSingleLock soundSampleLock(m_soundSampleLock);
+   CAtomicSpinLock soundSampleLock(m_soundSampleLock);
    SoundState ss = {
       ((CSoftAESound*)sound),
       samples,
@@ -597,7 +599,7 @@ void CSoftAE::FreeSound(IAESound *sound)
   if (!sound) return;
 
   sound->Stop();
-  CSingleLock soundLock(m_soundLock);
+  CAtomicSpinLock soundLock(m_soundLock);
   for(SoundList::iterator itt = m_sounds.begin(); itt != m_sounds.end(); ++itt)
     if (*itt == sound)
     {
@@ -622,7 +624,7 @@ unsigned int CSoftAE::GetSampleRate()
 
 void CSoftAE::StopSound(IAESound *sound)
 {
-  CSingleLock lock(m_soundSampleLock);
+  CAtomicSpinLock lock(m_soundSampleLock);
   for(SoundStateList::iterator itt = m_playing_sounds.begin(); itt != m_playing_sounds.end(); )
   {
     if ((*itt).owner == sound)
@@ -636,23 +638,25 @@ void CSoftAE::StopSound(IAESound *sound)
 
 IAEStream *CSoftAE::FreeStream(IAEStream *stream)
 {
-  CSingleLock lock(m_streamLock);
-  
-  /* ensure the stream still exists */
-  for(StreamList::iterator itt = m_streams.begin(); itt != m_streams.end(); ++itt)
-    if (*itt == stream)
-    {
-      itt = m_streams.erase(itt);
-      delete (CSoftAEStream*)stream;
-      break;
-    }
-
-  /* if it was the last stream and we have a mono output, or we are raw, then reopen */
-  if (m_streams.empty() && (m_chLayout.Count() <= 1 || (m_rawPassthrough && !m_transcode)))
+  bool open = false;
   {
-     lock.Leave();
-     OpenSink();
+    CAtomicSpinLock lock(m_streamLock);
+    /* ensure the stream still exists */
+    for(StreamList::iterator itt = m_streams.begin(); itt != m_streams.end(); ++itt)
+      if (*itt == stream)
+      {
+        itt = m_streams.erase(itt);
+        delete (CSoftAEStream*)stream;
+        break;
+      }
+
+    /* if it was the last stream and we have a mono output, or we are raw, then reopen */
+    if (m_streams.empty() && (m_chLayout.Count() <= 1 || (m_rawPassthrough && !m_transcode)))
+      open = true;
   }
+  
+  if (open)
+    OpenSink();
 
   return NULL;
 }
@@ -692,7 +696,7 @@ void CSoftAE::SetVolume(float volume)
 
 void CSoftAE::StopAllSounds()
 {
-  CSingleLock lock(m_soundSampleLock);
+  CAtomicSpinLock lock(m_soundSampleLock);
   while(!m_playing_sounds.empty())
   {
     SoundState *ss = &(*m_playing_sounds.begin());
@@ -704,7 +708,7 @@ void CSoftAE::StopAllSounds()
 void CSoftAE::Run()
 {
   /* we release this when we exit the thread unblocking anyone waiting on "Stop" */
-  CSingleLock runningLock(m_runningLock);
+  CAtomicSpinLock runningLock(m_runningLock);
 
   uint8_t *out = NULL;
   size_t   outSize = 0;
@@ -776,7 +780,7 @@ void CSoftAE::MixSounds(float *buffer, unsigned int samples)
 {
   SoundStateList::iterator itt;
 
-  CSingleLock lock(m_soundSampleLock);
+  CAtomicSpinLock lock(m_soundSampleLock);
   for(itt = m_playing_sounds.begin(); itt != m_playing_sounds.end(); )
   {
     SoundState *ss = &(*itt);
@@ -971,7 +975,7 @@ void CSoftAE::RunTranscodeStage()
 
 unsigned int CSoftAE::RunStreamStage(unsigned int channelCount, void *out, bool &restart)
 {
-  CSingleLock streamLock(m_streamLock);
+  CAtomicSpinLock streamLock(m_streamLock);
 
   if (m_rawPassthrough)
   {

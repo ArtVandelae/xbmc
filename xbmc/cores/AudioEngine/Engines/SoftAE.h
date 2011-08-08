@@ -25,7 +25,6 @@
 
 #include "system.h"
 #include "threads/Thread.h"
-#include "threads/CriticalSection.h"
 #include "threads/SharedSection.h"
 
 #include "Interfaces/ThreadedAE.h"
@@ -120,11 +119,11 @@ private:
 
   /* internal vars */
   bool             m_running, m_reOpened;
-  CCriticalSection m_runningLock;     /* released when the thread exits */
+  long             m_runningLock;     /* released when the thread exits */
   CSharedSection   m_sinkLock;        /* sink & configuration lock */
-  CCriticalSection m_streamLock;      /* m_streams lock */
-  CCriticalSection m_soundLock;       /* m_sounds lock */
-  CCriticalSection m_soundSampleLock; /* m_playing_sounds lock */
+  long             m_streamLock;      /* m_streams lock */
+  long             m_soundLock;       /* m_sounds lock */
+  long             m_soundSampleLock; /* m_playing_sounds lock */
 
   /* the current configuration */
   float               m_volume;

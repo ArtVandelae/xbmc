@@ -22,7 +22,7 @@
 #include "Interfaces/AESound.h"
 
 #include <samplerate.h>
-#include "threads/SingleLock.h"
+#include "threads/Atomics.h"
 #include "utils/log.h"
 #include "utils/EndianSwap.h"
 
@@ -46,10 +46,11 @@ typedef struct
 } WAVE_CHUNK;
 
 CSoftAESound::CSoftAESound(const CStdString &filename) :
-  IAESound         (filename),
-  m_filename       (filename),
-  m_volume         (1.0f    ),
-  m_inUse          (0       )
+  IAESound  (filename),
+  m_lock    (0       ),
+  m_filename(filename),
+  m_volume  (1.0f    ),
+  m_inUse   (0       )
 {
 }
 
@@ -75,7 +76,7 @@ bool CSoftAESound::Initialize()
 
 unsigned int CSoftAESound::GetSampleCount()
 {
-  CSingleLock cs(m_critSection);
+  CAtomicSpinLock cs(m_lock);
   if (m_wavLoader.IsValid())
     return m_wavLoader.GetSampleCount();
   return 0;
@@ -83,7 +84,7 @@ unsigned int CSoftAESound::GetSampleCount()
 
 float* CSoftAESound::GetSamples()
 {
-  CSingleLock cs(m_critSection);
+  CAtomicSpinLock cs(m_lock);
   if (!m_wavLoader.IsValid())
     return NULL;
 
@@ -93,15 +94,13 @@ float* CSoftAESound::GetSamples()
 
 void CSoftAESound::ReleaseSamples()
 {
-  CSingleLock cs(m_critSection);
   ASSERT(m_inUse > 0);
-  --m_inUse;
+  AtomicDecrement(&m_inUse);
 }
 
 bool CSoftAESound::IsPlaying()
 {
-  CSingleLock cs(m_critSection);
-  return (m_inUse > 0);
+  return m_inUse;
 }
 
 void CSoftAESound::Play()

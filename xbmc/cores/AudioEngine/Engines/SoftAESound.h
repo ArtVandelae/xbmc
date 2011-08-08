@@ -21,7 +21,6 @@
  */
 
 #include "utils/StdString.h"
-#include "threads/CriticalSection.h"
 #include "threads/SharedSection.h"
 #include "Interfaces/AESound.h"
 #include "Utils/AEWAVLoader.h"
@@ -49,10 +48,10 @@ public:
   virtual float* GetSamples    ();
   void           ReleaseSamples();
 private:
-  CCriticalSection m_critSection;
+  long             m_lock;
   CStdString       m_filename;
   CAEWAVLoader     m_wavLoader;
   float            m_volume;
-  int              m_inUse;
+  long             m_inUse;
 };
 
